@@ -1,38 +1,63 @@
 import streamlit as st
 import pandas as pd
+from sqlalchemy import text
 from core.db_manager import get_connection
 
-st.set_page_config(page_title="Research Hub", page_icon="🔬")
-st.title("🔬 科研大创与课题追踪")
-st.markdown("用于管理实验室项目、大创里程碑与文献调研进度。")
+st.set_page_config(page_title="科研大创", page_icon="🔬", layout="wide")
 
-with st.expander("➕ 新增科研任务/里程碑", expanded=False):
-    with st.form("research_form", clear_on_submit=True):
-        c1, c2 = st.columns(2)
-        t_name = c1.text_input("任务名称", placeholder="例如：多模态 AI 组会开题 PPT 准备")
-        t_stage = c2.selectbox("当前阶段", ["文献调研", "开题准备", "模型训练/开发", "论文撰写", "已结题"])
-        
-        c3, c4 = st.columns(2)
-        t_dead = c3.date_input("截止日期 (Deadline)")
-        t_notes = c4.text_input("备注信息", placeholder="例如：重点参考 CVPR 的最新论文...")
-        
-        if st.form_submit_button("保存任务"):
-            if t_name:
-                with get_connection() as conn:
-                    conn.execute("INSERT INTO research_tasks (task_name, stage, deadline, notes) VALUES (?, ?, ?, ?)", 
-                                 (t_name, t_stage, t_dead, t_notes))
-                    conn.commit()
-                st.success("科研任务已成功保存！")
-                st.rerun()
-
+st.title("🔬 个人科研与大创看板")
+st.caption("多模态学习与计算机视觉方向")
 st.divider()
 
-with get_connection() as conn:
-    df = pd.read_sql_query("SELECT id, task_name as 任务名称, stage as 阶段, deadline as 截止日期, notes as 备注 FROM research_tasks", conn)
+# ==========================================
+# 录入科研待办/任务
+# ==========================================
+with st.expander("➕ 添加新任务", expanded=False):
+    with st.form("add_research_form", clear_on_submit=True):
+        col1, col2 = st.columns(2)
+        with col1:
+            task_name = st.text_input("任务名称", placeholder="例如：阅读 CVPR 2026 综述文献")
+            stage = st.selectbox("当前阶段", ["文献调研", "导师沟通", "模型训练", "论文撰写"])
+        with col2:
+            deadline = st.date_input("截止日期")
+            notes = st.text_area("备注/想法", placeholder="记录关键思路...")
+            
+        submitted = st.form_submit_button("添加任务")
+        
+        if submitted and task_name:
+            try:
+                conn = get_connection()
+                # 修复点：使用 text() 和字典传参
+                query = text("INSERT INTO research_tasks (task_name, stage, deadline, notes) VALUES (:n, :s, :d, :note)")
+                conn.execute(query, {"n": task_name, "s": stage, "d": deadline, "note": notes})
+                conn.commit()
+                st.success("任务添加成功！")
+                st.rerun()
+            except Exception as e:
+                st.error(f"保存失败: {e}")
 
-if not df.empty:
-    st.subheader("📋 任务看板")
-    # 隐藏底层的 ID 列，使界面更清爽
-    st.dataframe(df.drop(columns=['id']), use_container_width=True)
-else:
-    st.info("💡 尚未录入科研任务，试着添加你的第一个大创里程碑吧。")
+# ==========================================
+# 任务看板渲染
+# ==========================================
+st.subheader("📋 科研任务进度流")
+try:
+    conn = get_connection()
+    df_tasks = pd.read_sql_query("SELECT * FROM research_tasks", conn)
+    
+    if not df_tasks.empty:
+        st.dataframe(
+            df_tasks,
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                "id": None,
+                "task_name": st.column_config.TextColumn("任务", width="large"),
+                "stage": st.column_config.TextColumn("阶段"),
+                "deadline": st.column_config.DateColumn("截止时间"),
+                "notes": st.column_config.TextColumn("备注")
+            }
+        )
+    else:
+        st.info("当前无待办科研任务。")
+except Exception as e:
+    st.error("数据库读取失败。")

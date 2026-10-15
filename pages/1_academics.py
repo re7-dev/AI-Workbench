@@ -1,62 +1,78 @@
 import streamlit as st
 import pandas as pd
+from sqlalchemy import text
 from core.db_manager import get_connection
-from core.scu_gpa_engine import process_academic_metrics
 
-st.set_page_config(page_title="Academic Records", page_icon="📊")
-st.title("📊 学业与 GPA 管理")
+st.set_page_config(page_title="学业大盘", page_icon="🎓", layout="wide")
 
+st.title("🎓 动态学业数据看板")
+st.divider()
+
+# ==========================================
+# 交互式数据录入表单
+# ==========================================
 with st.expander("➕ 录入新成绩", expanded=False):
-    with st.form("grade_form"):
-        c1, c2, c3, c4 = st.columns(4)
-        name = c1.text_input("课程名称")
-        credits = c2.number_input("学分", min_value=0.0, step=0.25, value=2.0)
-        grade = c3.text_input("成绩 (纯数字输入, 如: 89, 92.5)")
-        ctype = c4.selectbox("性质", ["必修", "通识", "跨专", "专业选修"])
+    with st.form("add_grade_form", clear_on_submit=True):
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            course_name = st.text_input("课程名称", placeholder="例如：线性代数")
+        with col2:
+            credits = st.number_input("学分", min_value=0.5, step=0.5)
+        with col3:
+            grade = st.text_input("分数/等级", placeholder="例如：95 或 A")
         
-        if st.form_submit_button("保存至数据库"):
-            if name and grade:
-                with get_connection() as conn:
-                    conn.execute("INSERT INTO grades (course_name, credits, grade, course_type) VALUES (?, ?, ?, ?)", 
-                                 (name, credits, grade, ctype))
-                    conn.commit()
-                st.success(f"《{name}》录入成功！")
-                st.rerun()
+        course_type = st.selectbox("修读性质", ["必修", "选修", "实践"])
+        submitted = st.form_submit_button("保存至云端数据库")
+        
+        if submitted and course_name and grade:
+            try:
+                conn = get_connection()
+                # 动态写入云端数据库
+                query = text("INSERT INTO grades (course_name, credits, grade, course_type) VALUES (:c, :cr, :g, :ct)")
+                conn.execute(query, {"c": course_name, "cr": credits, "g": grade, "ct": course_type})
+                conn.commit()
+                st.success("添加成功！")
+                st.rerun() # 刷新页面显示最新数据
+            except Exception as e:
+                st.error(f"保存失败: {e}")
+
+# ==========================================
+# 动态指标与表格展示
+# ==========================================
+conn = get_connection()
+df_grades = pd.read_sql_query("SELECT * FROM grades", conn)
+
+st.subheader("📊 核心指标看板")
+col1, col2, col3, col4 = st.columns(4)
+
+# 根据数据库真实数据动态计算
+total_courses = len(df_grades)
+total_credits = df_grades['credits'].sum() if not df_grades.empty else 0
+
+with col1:
+    st.metric(label="已修课程总数", value=f"{total_courses} 门")
+with col2:
+    st.metric(label="累计获得学分", value=f"{total_credits}")
+with col3:
+    st.metric(label="云端数据库状态", value="已连接", delta="实时同步")
+with col4:
+    st.metric(label="底层架构", value="Supabase", delta="PostgreSQL", delta_color="off")
 
 st.divider()
 
-with get_connection() as conn:
-    # 修正点 1：直接查询英文原字段，不在这里做中文映射，确保引擎能读取到 'credits'
-    df = pd.read_sql_query("SELECT course_name, credits, grade, course_type FROM grades", conn)
-
-if not df.empty:
-    # 此时传入的 df 包含标准英文字段，底层引擎不再报错
-    metrics = process_academic_metrics(df)
-    
-    st.subheader("🎯 核心指标看板")
-    
-    st.markdown("**全部课程 (Overall)**")
-    c1, c2, c3 = st.columns(3)
-    c1.metric("全部加权均分", f"{metrics['overall_avg']:.2f}")
-    c2.metric("全部绩点 (官方标准)", f"{metrics['overall_gpa']:.2f}")
-    c3.metric("总计学分", f"{metrics['total_credits']:.2f}")
-    
-    st.markdown("**必修课程 (Required Only)**")
-    c4, c5, c6 = st.columns(3)
-    c4.metric("必修加权均分", f"{metrics['req_avg']:.2f}")
-    c5.metric("必修绩点", f"{metrics['req_gpa']:.2f}")
-    c6.metric("必修学分", f"{metrics['req_credits']:.2f}")
-    
-    st.divider()
-    
-    # 修正点 2：在展示给用户看之前，利用 pandas 将英文列名重命名为中文表头
-    display_df = df.rename(columns={
-        'course_name': '课程', 
-        'credits': '学分', 
-        'grade': '成绩', 
-        'course_type': '性质',
-        'gpa': '单科绩点'
-    })
-    st.dataframe(display_df, use_container_width=True)
+st.subheader("📂 课程成绩库")
+if not df_grades.empty:
+    st.dataframe(
+        df_grades,
+        use_container_width=True,
+        hide_index=True,
+        column_config={
+            "id": None, # 隐藏数据库生成的内部 ID
+            "course_name": st.column_config.TextColumn("课程名称", width="large"),
+            "credits": st.column_config.NumberColumn("学分", format="%.1f"),
+            "grade": st.column_config.TextColumn("分数/等级"),
+            "course_type": st.column_config.TextColumn("修读性质")
+        }
+    )
 else:
-    st.info("数据库目前为空，请尝试在上方录入第一门课程的数据。")
+    st.info("暂无成绩数据，请在上方表单中录入第一条数据。")

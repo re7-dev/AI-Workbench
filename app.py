@@ -1,79 +1,80 @@
 import streamlit as st
 import pandas as pd
-# 修改点 1：从最新的 core.db_manager 导入新函数
+from sqlalchemy import text
 from core.db_manager import init_database, get_connection
 
-st.set_page_config(page_title="AI Workbench", page_icon="🖥", layout="wide")
+# ==========================================
+# 1. 全局页面配置 (必须在最前面)
+# ==========================================
+st.set_page_config(
+    page_title="AI & Research Workbench",
+    page_icon="🌌",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
 
-# 修改点 2：调用全新的建表函数
-init_database()
-
-st.title("🖥️ 薛紫元的数字工作台中枢")
-st.markdown("欢迎回来。以下是你的专业学业与科研数据总览。")
-st.markdown("---")
-
-# ======== 1. 核心指标面板 (从数据库实时读取) ========
-conn = get_connection()
-
+# 初始化云端数据库表结构 (如果表不存在则自动创建)
 try:
-    grades_df = pd.read_sql_query("SELECT credits FROM grades", conn)
-    total_courses = len(grades_df)
-    total_credits = grades_df['credits'].astype(float).sum() if not grades_df.empty else 0.0
-except:
-    total_courses, total_credits = 0, 0.0
+    init_database()
+except Exception as e:
+    st.sidebar.error(f"数据库初始化失败: {e}")
 
-try:
-    proj_count = pd.read_sql_query("SELECT COUNT(*) FROM projects", conn).iloc[0,0]
-    algo_count = pd.read_sql_query("SELECT COUNT(*) FROM algorithms", conn).iloc[0,0]
-except:
-    proj_count, algo_count = 0, 0
+# ==========================================
+# 2. 页面顶栏
+# ==========================================
+st.title("🌌 个人专属 AI 职业生涯工作台")
+st.divider()
 
-c1, c2, c3, c4 = st.columns(4)
-c1.metric("已录入课程", f"{total_courses} 门")
-c2.metric("已修总学分", f"{total_credits:.2f}")
-c3.metric("工程项目归档", f"{proj_count} 个")
-c4.metric("算法题库累积", f"{algo_count} 题")
+# ==========================================
+# 3. 页面主体布局：左侧待办区，右侧名片区
+# ==========================================
+col1, col2 = st.columns([2, 1]) # 左侧内容更宽，比例为 2:1
 
-st.markdown("---")
-
-# ======== 2. 开发者名片 & 动态待办 ========
-col_left, col_right = st.columns([2, 1])
-
-with col_right:
-    st.info("""
-    **👤 开发者名片**
-    - **学籍**：四川大学 计算机学院
-    - **专业**：人工智能专业 1班
-    - **学号**：2025141460548
-    """)
-
-with col_left:
+with col1:
     st.subheader("🎯 最近动态与待办")
     
-    # 录入新待办的输入框
-    with st.form("todo_form", clear_on_submit=True):
-        new_todo = st.text_input("添加新动态/待办事项：", placeholder="例如：推进多模态 AI 大创开题...")
-        if st.form_submit_button("添加"):
-            if new_todo:
-                # 修改点 3：对齐最新的系统待办表名 sys_todos
-                conn.execute("INSERT INTO sys_todos (content) VALUES (?)", (new_todo,))
-                conn.commit()
-                st.rerun()
-                
-    # 展示待办列表并提供删除功能
-    try:
-        todos_df = pd.read_sql_query("SELECT id, content FROM sys_todos ORDER BY id DESC", conn)
-        if not todos_df.empty:
-            for _, row in todos_df.iterrows():
-                col_text, col_btn = st.columns([8, 1])
-                col_text.markdown(f"🔹 {row['content']}")
-                if col_btn.button("🗑️", key=f"del_{row['id']}"):
-                    conn.execute("DELETE FROM sys_todos WHERE id=?", (row['id'],))
+    # 交互式待办录入表单
+    with st.container(border=True):
+        with st.form("add_todo_form", clear_on_submit=True):
+            st.write("添加新动态/待办事项：")
+            new_todo = st.text_input("待办内容", label_visibility="collapsed", placeholder="例如：推进多模态 AI 大创开题...")
+            submitted = st.form_submit_button("添加")
+            
+            if submitted and new_todo:
+                try:
+                    conn = get_connection()
+                    # 【核心修复点】：使用 text() 和字典传参，彻底解决 ArgumentError
+                    query = text("INSERT INTO sys_todos (content) VALUES (:c)")
+                    conn.execute(query, {"c": new_todo})
                     conn.commit()
+                    st.success("添加成功！")
                     st.rerun()
+                except Exception as e:
+                    st.error(f"保存失败: {e}")
+    
+    # 动态展示云端待办列表
+    st.write("### 待办清单")
+    try:
+        conn = get_connection()
+        # 按 ID 倒序排列，让最新的待办显示在最上面
+        df_todos = pd.read_sql_query("SELECT * FROM sys_todos ORDER BY id DESC", conn)
+        
+        if not df_todos.empty:
+            for index, row in df_todos.iterrows():
+                # 使用 info 框让每一条待办看起来像一张小卡片
+                st.info(f"📌 {row['content']}")
         else:
-            st.write("暂无动态，请在上方添加。")
-    except:
-        st.write("数据加载中...")
+            st.caption("太棒了，当前暂无待办事项！")
+    except Exception as e:
+        st.error("无法加载待办事项，请检查数据库连接。")
 
-conn.close()
+with col2:
+    # 专属开发者名片
+    with st.container(border=True):
+        st.markdown("### 👤 开发者名片")
+        st.markdown("""
+        * **姓名**：薛紫元
+        * **学籍**：四川大学 人工智能学院
+        * **专业**：人工智能
+        * **学号**：2025141460548
+        """)
