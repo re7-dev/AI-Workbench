@@ -17,7 +17,7 @@ except Exception:
     st.error('数据暂时无法读取，请稍后重试。')
     st.stop()
 
-section('ACADEMIC SNAPSHOT', '学业仪表盘')
+section('ACADEMIC PERFORMANCE', '学业仪表盘')
 academic_dashboard(grades)
 activity_dashboard(todos, projects, algorithms, research, applications)
 st.write('')
