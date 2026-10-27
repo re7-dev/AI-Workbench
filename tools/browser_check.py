@@ -5,7 +5,7 @@ from playwright.sync_api import sync_playwright
 root = Path(__file__).resolve().parents[1]
 out = root / 'test-results'
 out.mkdir(exist_ok=True)
-credentials = dict(line.split(': ', 1) for line in (root / 'private/accounts.txt').read_text().splitlines())
+credentials = dict(line.split(': ', 1) for line in (root / 'private/accounts.txt').read_text().splitlines() if ': ' in line and line.split(': ', 1)[0] in ('admin', 'viewer'))
 with sync_playwright() as p:
     browser = p.chromium.launch()
     page = browser.new_page(viewport={'width': 1440, 'height': 1000})

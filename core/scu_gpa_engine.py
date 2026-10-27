@@ -9,10 +9,9 @@ def calculate_single_gpa(score):
 
 
 def process_academic_metrics(df):
-    data = df.copy()
-    data['grade'] = pd.to_numeric(data['grade'], errors='coerce')
-    data['credits'] = pd.to_numeric(data['credits'], errors='coerce')
-    data = data[data.grade.between(0, 100) & (data.credits > 0)]
+    from core.academics import academic_summary
+    summary = academic_summary(df)
+    data = summary['weighted'].copy().rename(columns={'grade': 'original_grade', 'score': 'grade'})
     if data.empty:
         return None
     metrics = {'total_credits': data.credits.sum()}

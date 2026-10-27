@@ -2,6 +2,7 @@ from datetime import date
 from urllib.parse import urlparse
 import io
 import zipfile
+from pathlib import Path
 import pandas as pd
 import streamlit as st
 from core.auth import login_gate, role, require_access
@@ -10,7 +11,7 @@ from core.db_manager import init_database, read_records, save_record, delete_rec
 # label, input kind/options, required
 SCHEMAS = {
  'sys_todos': ('待办清单', '☑️', {'content': ('待办内容', 'text', True), 'status': ('状态', ['待办', '进行中', '已完成'], True)}),
- 'grades': ('学业大盘', '🎓', {'course_name': ('课程名称', 'text', True), 'credits': ('学分', 'credits', True), 'grade': ('成绩', 'text', True), 'course_type': ('修读性质', ['必修', '选修', '实践'], True)}),
+ 'grades': ('学业大盘', '🎓', {'course_name': ('课程名称', 'text', True), 'credits': ('学分', 'credits', True), 'grade': ('成绩', 'text', True), 'course_type': ('修读性质', ['必修', '选修', '任选', '实践'], True), 'semester': ('学期', 'text', False), 'course_code': ('课程号', 'text', False)}),
  'projects': ('工程资产', '💻', {'project_name': ('项目名称', 'text', True), 'tech_stack': ('技术栈', 'text', False), 'status': ('状态', ['需求规划', '开发中', '已部署', '已归档'], True), 'repo_url': ('仓库链接', 'url', False)}),
  'algorithms': ('算法题库', '🧩', {'title': ('题目名称', 'text', True), 'difficulty': ('难度', ['简单', '中等', '困难'], True), 'tags': ('知识点标签', 'text', False), 'status': ('掌握状态', ['未开始', '一刷完成', '需复习', '已掌握'], True), 'review_count': ('复习次数', 'count', False)}),
  'research_tasks': ('科研任务', '🔬', {'task_name': ('任务名称', 'text', True), 'stage': ('当前阶段', ['文献调研', '导师沟通', '模型训练', '论文撰写', '已完成'], True), 'deadline': ('截止日期', 'date', False), 'notes': ('备注', 'area', False)}),
@@ -20,14 +21,7 @@ SCHEMAS = {
 
 def setup(title, icon):
     st.set_page_config(page_title=f'{title} · AI Workbench', page_icon=icon, layout='wide')
-    st.markdown('''<style>
-    .block-container {max-width:1240px;padding-top:2.5rem;}
-    [data-testid="stMetric"] {border:1px solid #334155;border-radius:14px;padding:18px;}
-    [data-testid="stSidebar"] {border-right:1px solid #334155;}
-    h1 {letter-spacing:-.035em;font-size:2.4rem;}
-    h2 {font-size:1.5rem;}
-    .stButton>button,.stDownloadButton>button {border-radius:9px;}
-    </style>''', unsafe_allow_html=True)
+    st.markdown('<style>' + Path(__file__).with_name('styles.css').read_text(encoding='utf-8') + '</style>', unsafe_allow_html=True)
     login_gate()
     try:
         init_database()
@@ -51,7 +45,7 @@ def clean(value):
 
 def validate(name, values):
     for field, (label, kind, required) in SCHEMAS[name][2].items():
-        value = values[field]
+        value = values.get(field)
         if required and (value is None or isinstance(value, str) and not value.strip()):
             raise ValueError(f'请填写{label}')
         if kind == 'url' and value:
@@ -59,6 +53,8 @@ def validate(name, values):
             if parsed.scheme not in ('https', 'http') or not parsed.hostname:
                 raise ValueError('仓库链接必须是有效的 HTTP/HTTPS 地址')
     if name == 'grades':
+        from core.academics import validate_grade
+        validate_grade(values)
         grade = values['grade'].upper()
         if grade not in ('A+', 'A', 'A-', 'B+', 'B', 'B-', 'C+', 'C', 'C-', 'D', 'F', '优秀', '良好', '中等', '及格', '不及格', '通过', '不通过'):
             try:
@@ -92,7 +88,7 @@ def editor(name, frame):
                     if kind == 'count':
                         values[field] = st.number_input(label, min_value=0, max_value=100000, value=int(value or 0), step=1)
                     else:
-                        values[field] = st.number_input(label, min_value=0.5 if kind == 'credits' else 0.0, max_value=100.0 if kind == 'credits' else 9.0, value=float(value if value is not None else (1.0 if kind == 'credits' else 6.5)), step=0.5)
+                        values[field] = st.number_input(label, min_value=0.0, max_value=100.0 if kind == 'credits' else 9.0, value=float(value if value is not None else (1.0 if kind == 'credits' else 6.5)), step=0.25 if kind == 'credits' else 0.5)
                 else:
                     widget = st.text_area if kind == 'area' else st.text_input
                     values[field] = widget(label, value=str(value or ''), max_chars=5000 if kind == 'area' else 500).strip()
@@ -121,9 +117,14 @@ def show_records(name, frame):
     schema = SCHEMAS[name][2]
     query = st.text_input('搜索记录', placeholder='输入名称、标签或备注…', key=f'search_{name}')
     filtered = frame
+    if name == 'grades':
+        semesters = sorted(frame.semester.dropna().unique(), reverse=True)
+        chosen_semester = st.multiselect('筛选学期', semesters, key='grade_semesters')
+        if chosen_semester:
+            filtered = filtered[filtered.semester.isin(chosen_semester)]
     if query:
         mask = frame.astype(str).apply(lambda col: col.str.contains(query, case=False, regex=False)).any(axis=1)
-        filtered = frame[mask]
+        filtered = filtered[mask.reindex(filtered.index)]
     for field, (label, kind, _) in schema.items():
         if isinstance(kind, list):
             options = sorted(frame[field].dropna().unique().tolist())
@@ -135,6 +136,12 @@ def show_records(name, frame):
         st.info('暂无匹配记录。')
     else:
         display = filtered.rename(columns={field: spec[0] for field, spec in schema.items()}).drop(columns=['id'])
+        if name == 'grades':
+            from core.academics import academic_summary
+            calculated = academic_summary(filtered)['all']
+            display = display.rename(columns={'学分': '原始学分', '成绩': '原始成绩'})
+            display['统计学分'] = calculated.credits
+            display['统计分数'] = calculated.score
         st.dataframe(display, hide_index=True, use_container_width=True)
         if name == 'projects':
             for _, row in filtered.iterrows():
@@ -157,13 +164,12 @@ def records_page(name):
         st.error('数据暂时无法读取，请稍后重试。')
         st.stop()
     if name == 'grades':
-        from core.scu_gpa_engine import process_academic_metrics
-        metrics = process_academic_metrics(frame)
-        cols = st.columns(3)
-        cols[0].metric('课程数', len(frame))
-        cols[1].metric('已录入学分', f"{frame.credits.sum():g}")
-        cols[2].metric('百分制加权均分', f"{metrics['overall_avg']:.2f}" if metrics else '—')
-        st.caption('加权均分仅纳入百分制课程；等级成绩保留展示。')
+        from core.dashboard import academic_dashboard, hero
+        hero('让每一份努力，都看得见', '按学期回顾成绩，理解优势，把下一步走得更清楚。', ['ACADEMIC INSIGHTS', '原始成绩完整保留'])
+        semesters = sorted(frame.semester.dropna().loc[lambda x: x != ''].unique().tolist(), reverse=True)
+        selected = st.selectbox('图表学期', ['全部学期'] + semesters)
+        academic_dashboard(frame if selected == '全部学期' else frame[frame.semester == selected], detailed=True)
+        grade_importer()
     else:
         cols = st.columns(3)
         cols[0].metric('记录总数', len(frame))
@@ -175,6 +181,41 @@ def records_page(name):
             cols[2].metric('逾期未完成', int(((dates.dt.date < date.today()) & active).sum()))
     editor(name, frame)
     show_records(name, frame)
+
+
+def grade_importer():
+    if role() != 'admin':
+        return
+    from core.academics import parse_grade_csv
+    from core.db_manager import import_grades
+    import hashlib
+    with st.expander('批量导入成绩 CSV'):
+        st.caption('先预览再导入；相同记录会跳过，冲突记录会提示核对。导入保留原始成绩，统计换算在仪表盘单独处理。')
+        template = 'course_name,credits,grade,course_type,semester,course_code\n示例课程,2,90,必修,2025-2026学年秋,\n'
+        st.download_button('下载导入模板', template.encode('utf-8-sig'), 'grades-template.csv', 'text/csv')
+        uploaded = st.file_uploader('选择成绩 CSV', type=['csv'], key='grade_csv')
+        if uploaded is not None:
+            try:
+                rows = parse_grade_csv(uploaded.getvalue())
+            except ValueError as exc:
+                st.error(str(exc))
+            else:
+                st.dataframe(pd.DataFrame(rows), hide_index=True, use_container_width=True)
+                st.caption(f"待导入 {len(rows)} 门；原始学分合计 {sum(row['credits'] for row in rows):g}。")
+                digest = hashlib.sha256(uploaded.getvalue()).hexdigest()
+                confirmed = st.checkbox('我已核对预览，确认导入', key='import_confirm_' + digest)
+                if st.button('确认导入成绩', disabled=not confirmed, type='primary'):
+                    try:
+                        inserted, skipped = import_grades(rows)
+                    except ValueError as exc:
+                        st.error(str(exc))
+                    except Exception:
+                        st.error('导入失败，未写入任何记录，请稍后重试。')
+                    else:
+                        st.session_state['_import_result'] = f'成绩导入完成：新增 {inserted} 门，跳过重复 {skipped} 门。'
+                        st.rerun()
+        if st.session_state.get('_import_result'):
+            st.success(st.session_state['_import_result'])
 
 
 def backup():

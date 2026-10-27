@@ -1,13 +1,13 @@
-from datetime import date, timedelta
-import pandas as pd
 import streamlit as st
 from core.ui import setup, editor, show_records, backup
 from core.auth import role
 from core.db_manager import read_records
+from core.dashboard import academic_dashboard, activity_dashboard, hero, section, today
 
 setup('工作空间', '🌌')
-st.caption('把学习计划、工程实践和研究进展，汇聚在一起。')
+hero('把热爱，积累成未来的底气', '在一个工作空间里，连接你的学业、工程实践与研究计划。每一步进展，都值得被看见。', [today().strftime('%Y / %m / %d'), 'LEARN · BUILD · DISCOVER'])
 try:
+    grades = read_records('grades')
     todos = read_records('sys_todos')
     projects = read_records('projects')
     algorithms = read_records('algorithms')
@@ -16,41 +16,26 @@ try:
 except Exception:
     st.error('数据暂时无法读取，请稍后重试。')
     st.stop()
-cols = st.columns(4)
-cols[0].metric('待完成事项', int((todos.status.fillna('待办') != '已完成').sum()))
-cols[1].metric('工程项目', len(projects))
-cols[2].metric('已掌握算法', int((algorithms.status == '已掌握').sum()))
-cols[3].metric('科研任务', len(research))
+
+section('ACADEMIC SNAPSHOT', '学业仪表盘')
+academic_dashboard(grades)
+activity_dashboard(todos, projects, algorithms, research, applications)
 st.write('')
-left, right = st.columns([2, 1])
-with left:
-    st.subheader('今日聚焦')
+left, right = st.columns([1.45, 1])
+with left, st.container(border=True):
+    section('FOCUS & FOLLOW THROUGH', '今日聚焦')
     editor('sys_todos', todos)
     show_records('sys_todos', todos)
-with right:
-    with st.container(border=True):
-        st.subheader('近期截止')
-        upcoming = []
-        for frame, label, field in [(research, '科研', 'task_name'), (applications, '升学', 'university')]:
-            for _, row in frame.iterrows():
-                if row.get('status', row.get('stage')) in ('已完成', '已结束', '已拿 Offer'):
-                    continue
-                deadline = pd.to_datetime(row['deadline'], errors='coerce')
-                if pd.notna(deadline) and deadline.date() <= date.today() + timedelta(days=14):
-                    upcoming.append((deadline.date(), label, row[field]))
-        for deadline, label, title in sorted(upcoming):
-            days = (deadline - date.today()).days
-            st.write(f'{title}')
-            st.caption(f"{label} · {deadline} · {'已逾期 ' + str(-days) + ' 天' if days < 0 else str(days) + ' 天后截止'}")
-        if not upcoming:
-            st.caption('未来两周暂无截止事项。')
-    with st.container(border=True):
-        st.subheader('快速前往')
-        st.page_link('pages/1_academics.py', label='学业大盘', icon='🎓')
-        st.page_link('pages/2_projects.py', label='工程资产', icon='💻')
-        st.page_link('pages/4_research_hub.py', label='科研任务', icon='🔬')
+with right, st.container(border=True):
+    section('EXPLORE YOUR SPACE', '开启下一段探索')
+    st.page_link('pages/1_academics.py', label='学业大盘', icon='🎓')
+    st.caption('课程明细 · 学期对比 · 成绩分析')
+    st.page_link('pages/2_projects.py', label='工程资产', icon='💻')
+    st.caption('项目积累 · 技术实践 · 作品归档')
+    st.page_link('pages/4_research_hub.py', label='科研任务', icon='🔬')
+    st.caption('文献阅读 · 实验记录 · 研究进度')
 if role() == 'admin':
     with st.expander('数据备份'):
         st.caption('备份包含各模块原始 CSV 数据，请妥善保存。')
         if st.button('生成全量备份'):
-            st.download_button('下载备份 ZIP', backup(), f'workbench-{date.today()}.zip', 'application/zip')
+            st.download_button('下载备份 ZIP', backup(), f'workbench-{today()}.zip', 'application/zip')
