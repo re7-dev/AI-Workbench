@@ -1,6 +1,18 @@
 [theme]
+# 强调色，用于按钮、滑块和选中的 Tab
 primaryColor = "#7C3AED"
+# 主背景色，深灰黑
 backgroundColor = "#0F172A"
+# 侧边栏和卡片背景色，稍微浅一点的灰蓝
 secondaryBackgroundColor = "#1E293B"
+# 字体颜色，亮白偏灰，护眼
 textColor = "#F8FAFC"
+# 采用现代化无衬线字体
 font = "sans serif"
+
+[client]
+showSidebarNavigation = false
+
+[server]
+enableXsrfProtection = true
+enableCORS = true

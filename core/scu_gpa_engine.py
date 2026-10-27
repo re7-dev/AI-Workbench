@@ -1,48 +1,24 @@
-def calculate_single_gpa(score: float) -> float:
-    """根据分数返回对应的 4.0 制单科绩点"""
-    if score >= 90: return 4.0
-    elif score >= 85: return 3.7
-    elif score >= 80: return 3.3
-    elif score >= 76: return 3.0
-    elif score >= 73: return 2.7
-    elif score >= 70: return 2.3
-    elif score >= 66: return 2.0
-    elif score >= 63: return 1.7
-    elif score >= 61: return 1.3
-    elif score >= 60: return 1.0
-    else: return 0.0
+import pandas as pd
+
+
+def calculate_single_gpa(score):
+    for threshold, value in [(90,4.0),(85,3.7),(80,3.3),(76,3.0),(73,2.7),(70,2.3),(66,2.0),(63,1.7),(61,1.3),(60,1.0)]:
+        if score >= threshold:
+            return value
+    return 0.0
+
 
 def process_academic_metrics(df):
-    """
-    接收成绩 DataFrame，统一计算总加权、必修加权与对应绩点。
-    返回包含整体与必修指标的字典，供前端直接渲染。
-    """
-    if df.empty:
+    data = df.copy()
+    data['grade'] = pd.to_numeric(data['grade'], errors='coerce')
+    data['credits'] = pd.to_numeric(data['credits'], errors='coerce')
+    data = data[data.grade.between(0, 100) & (data.credits > 0)]
+    if data.empty:
         return None
-        
-    df['credits'] = df['credits'].astype(float)
-    df['grade'] = df['grade'].astype(float)
-    df['gpa'] = df['grade'].apply(calculate_single_gpa)
-    
-    metrics = {}
-    
-    # 全部课程指标
-    total_credits = df['credits'].sum()
-    if total_credits > 0:
-        metrics['overall_avg'] = (df['grade'] * df['credits']).sum() / total_credits
-        metrics['overall_gpa'] = (df['gpa'] * df['credits']).sum() / total_credits
-    else:
-        metrics['overall_avg'] = metrics['overall_gpa'] = 0.0
-    metrics['total_credits'] = total_credits
-    
-    # 必修课程指标
-    req_df = df[df['course_type'] == '必修']
-    req_credits = req_df['credits'].sum()
-    if req_credits > 0:
-        metrics['req_avg'] = (req_df['grade'] * req_df['credits']).sum() / req_credits
-        metrics['req_gpa'] = (req_df['gpa'] * req_df['credits']).sum() / req_credits
-    else:
-        metrics['req_avg'] = metrics['req_gpa'] = 0.0
-    metrics['req_credits'] = req_credits
-    
+    metrics = {'total_credits': data.credits.sum()}
+    for prefix, subset in [('overall', data), ('req', data[data.course_type == '必修'])]:
+        credits = subset.credits.sum()
+        metrics[f'{prefix}_avg'] = (subset.grade * subset.credits).sum() / credits if credits else 0
+        metrics[f'{prefix}_gpa'] = (subset.grade.apply(calculate_single_gpa) * subset.credits).sum() / credits if credits else 0
+    metrics['req_credits'] = data.loc[data.course_type == '必修', 'credits'].sum()
     return metrics

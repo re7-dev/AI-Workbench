@@ -1,32 +1,30 @@
+import ipaddress
+import socket
+from urllib.parse import urlparse
 import requests
+from core.auth import require_access
 
-def call_llm_api(api_url: str, api_key: str, model_name: str, prompt: str, temperature: float = 0.7):
-    """
-    标准兼容格式的大语言模型 API 调用封装
-    """
-    headers = {
-        "Content-Type": "application/json",
-        "Authorization": f"Bearer {api_key}"
-    }
-    
-    payload = {
-        "model": model_name,
-        "messages": [{"role": "user", "content": prompt}],
-        "temperature": temperature
-    }
-    
+
+def validate_api_url(url):
+    parsed = urlparse(url)
+    if parsed.scheme != 'https' or not parsed.hostname or parsed.username or parsed.password or parsed.port not in (None, 443):
+        raise ValueError('仅支持公共 HTTPS API 地址（443 端口）')
+    addresses = socket.getaddrinfo(parsed.hostname, 443, type=socket.SOCK_STREAM)
+    if not addresses or any(not ipaddress.ip_address(address[4][0]).is_global for address in addresses):
+        raise ValueError('不允许访问本机或内网地址')
+
+
+def call_llm_api(api_url, api_key, model_name, prompt, temperature=0.7):
+    require_access(admin=True)
     try:
-        # 设置 30 秒超时，防止请求挂起导致系统卡死
-        response = requests.post(api_url, headers=headers, json=payload, timeout=30)
-        response.raise_for_status()  # 检查 HTTP 状态码
-        result = response.json()
-        
-        # 提取并返回模型生成的文本
-        return result['choices'][0]['message']['content'], None
-        
-    except requests.exceptions.RequestException as e:
-        return None, f"网络请求异常: {str(e)}"
-    except KeyError:
-        return None, "解析响应失败：API 返回的 JSON 格式不兼容"
-    except Exception as e:
-        return None, f"未知错误: {str(e)}"
+        validate_api_url(api_url)
+        if not model_name.strip():
+            return None, '请填写模型名称'
+        response = requests.post(api_url, headers={'Authorization': f'Bearer {api_key}', 'Content-Type': 'application/json'}, json={'model': model_name, 'messages': [{'role': 'user', 'content': prompt}], 'temperature': temperature}, timeout=(10, 60), allow_redirects=False)
+        if response.status_code != 200:
+            return None, f'API 请求失败（HTTP {response.status_code}），请检查配置。'
+        return response.json()['choices'][0]['message']['content'], None
+    except (ValueError, OSError):
+        return None, 'API 地址无效或无法解析，请使用公共 HTTPS 地址。'
+    except (requests.RequestException, KeyError, IndexError, TypeError):
+        return None, '请求失败或响应格式不兼容，请检查服务与配置。'

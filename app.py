@@ -1,80 +1,56 @@
-import streamlit as st
+from datetime import date, timedelta
 import pandas as pd
-from sqlalchemy import text
-from core.db_manager import init_database, get_connection
+import streamlit as st
+from core.ui import setup, editor, show_records, backup
+from core.auth import role
+from core.db_manager import read_records
 
-# ==========================================
-# 1. 全局页面配置 (必须在最前面)
-# ==========================================
-st.set_page_config(
-    page_title="AI & Research Workbench",
-    page_icon="🌌",
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
-
-# 初始化云端数据库表结构 (如果表不存在则自动创建)
+setup('工作空间', '🌌')
+st.caption('把学习计划、工程实践和研究进展，汇聚在一起。')
 try:
-    init_database()
-except Exception as e:
-    st.sidebar.error(f"数据库初始化失败: {e}")
-
-# ==========================================
-# 2. 页面顶栏
-# ==========================================
-st.title("🌌 个人专属 AI 职业生涯工作台")
-st.divider()
-
-# ==========================================
-# 3. 页面主体布局：左侧待办区，右侧名片区
-# ==========================================
-col1, col2 = st.columns([2, 1]) # 左侧内容更宽，比例为 2:1
-
-with col1:
-    st.subheader("🎯 最近动态与待办")
-    
-    # 交互式待办录入表单
+    todos = read_records('sys_todos')
+    projects = read_records('projects')
+    algorithms = read_records('algorithms')
+    research = read_records('research_tasks')
+    applications = read_records('career_applications')
+except Exception:
+    st.error('数据暂时无法读取，请稍后重试。')
+    st.stop()
+cols = st.columns(4)
+cols[0].metric('待完成事项', int((todos.status.fillna('待办') != '已完成').sum()))
+cols[1].metric('工程项目', len(projects))
+cols[2].metric('已掌握算法', int((algorithms.status == '已掌握').sum()))
+cols[3].metric('科研任务', len(research))
+st.write('')
+left, right = st.columns([2, 1])
+with left:
+    st.subheader('今日聚焦')
+    editor('sys_todos', todos)
+    show_records('sys_todos', todos)
+with right:
     with st.container(border=True):
-        with st.form("add_todo_form", clear_on_submit=True):
-            st.write("添加新动态/待办事项：")
-            new_todo = st.text_input("待办内容", label_visibility="collapsed", placeholder="例如：推进多模态 AI 大创开题...")
-            submitted = st.form_submit_button("添加")
-            
-            if submitted and new_todo:
-                try:
-                    conn = get_connection()
-                    # 【核心修复点】：使用 text() 和字典传参，彻底解决 ArgumentError
-                    query = text("INSERT INTO sys_todos (content) VALUES (:c)")
-                    conn.execute(query, {"c": new_todo})
-                    conn.commit()
-                    st.success("添加成功！")
-                    st.rerun()
-                except Exception as e:
-                    st.error(f"保存失败: {e}")
-    
-    # 动态展示云端待办列表
-    st.write("### 待办清单")
-    try:
-        conn = get_connection()
-        # 按 ID 倒序排列，让最新的待办显示在最上面
-        df_todos = pd.read_sql_query("SELECT * FROM sys_todos ORDER BY id DESC", conn)
-        
-        if not df_todos.empty:
-            for index, row in df_todos.iterrows():
-                # 使用 info 框让每一条待办看起来像一张小卡片
-                st.info(f"📌 {row['content']}")
-        else:
-            st.caption("太棒了，当前暂无待办事项！")
-    except Exception as e:
-        st.error("无法加载待办事项，请检查数据库连接。")
-
-with col2:
-    # 专属开发者名片
+        st.subheader('近期截止')
+        upcoming = []
+        for frame, label, field in [(research, '科研', 'task_name'), (applications, '升学', 'university')]:
+            for _, row in frame.iterrows():
+                if row.get('status', row.get('stage')) in ('已完成', '已结束', '已拿 Offer'):
+                    continue
+                deadline = pd.to_datetime(row['deadline'], errors='coerce')
+                if pd.notna(deadline) and deadline.date() <= date.today() + timedelta(days=14):
+                    upcoming.append((deadline.date(), label, row[field]))
+        for deadline, label, title in sorted(upcoming):
+            days = (deadline - date.today()).days
+            st.write(f'{title}')
+            st.caption(f"{label} · {deadline} · {'已逾期 ' + str(-days) + ' 天' if days < 0 else str(days) + ' 天后截止'}")
+        if not upcoming:
+            st.caption('未来两周暂无截止事项。')
     with st.container(border=True):
-        st.markdown("### 👤 开发者名片")
-        st.markdown("""
-        * **姓名**：薛紫元
-        * **学籍**：四川大学 人工智能学院
-        * **专业**：人工智能
-        * **学号**：2025141460548
-        """)
+        st.subheader('快速前往')
+        st.page_link('pages/1_academics.py', label='学业大盘', icon='🎓')
+        st.page_link('pages/2_projects.py', label='工程资产', icon='💻')
+        st.page_link('pages/4_research_hub.py', label='科研任务', icon='🔬')
+if role() == 'admin':
+    with st.expander('数据备份'):
+        st.caption('备份包含各模块原始 CSV 数据，请妥善保存。')
+        if st.button('生成全量备份'):
+            st.download_button('下载备份 ZIP', backup(), f'workbench-{date.today()}.zip', 'application/zip')
