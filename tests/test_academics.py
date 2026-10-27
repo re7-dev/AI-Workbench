@@ -21,6 +21,22 @@ def test_personal_weighting_policy_preserves_source():
     assert data.grade.iloc[0] == 'A-'
     assert data.credits.iloc[1] == 0
     assert summary['excellent'] == 1
+    assert summary['gpa'] == pytest.approx((3.7 + 3.7 * .25 + 4.0 * 2) / 3.25)
+
+
+def test_required_and_overall_are_weighted_separately():
+    rows = records() + [dict(course_name='选修课', credits=2, grade='60', course_type='任选', semester='', course_code='04')]
+    result = academic_summary(pd.DataFrame(rows))
+    assert result['required_average'] == pytest.approx((85 + 87 * .25 + 90 * 2) / 3.25)
+    assert result['average'] == pytest.approx((85 + 87 * .25 + 90 * 2 + 60 * 2) / 5.25)
+    assert result['required_gpa'] == pytest.approx((3.7 + 3.7 * .25 + 4 * 2) / 3.25)
+    assert result['gpa'] == pytest.approx((3.7 + 3.7 * .25 + 4 * 2 + 1 * 2) / 5.25)
+
+
+@pytest.mark.parametrize('score,point', [(100,4),(90,4),(89,3.7),(85,3.7),(84,3.3),(80,3.3),(79,3),(76,3),(75,2.7),(73,2.7),(72,2.3),(70,2.3),(69,2),(66,2),(65,1.7),(63,1.7),(62,1.3),(61,1.3),(60,1),(59,0),(0,0)])
+def test_grade_point_boundaries(score, point):
+    from core.scu_gpa_engine import calculate_single_gpa
+    assert calculate_single_gpa(score) == point
 
 
 def test_semester_order():

@@ -18,6 +18,6 @@ def process_academic_metrics(df):
     for prefix, subset in [('overall', data), ('req', data[data.course_type == '必修'])]:
         credits = subset.credits.sum()
         metrics[f'{prefix}_avg'] = (subset.grade * subset.credits).sum() / credits if credits else 0
-        metrics[f'{prefix}_gpa'] = (subset.grade.apply(calculate_single_gpa) * subset.credits).sum() / credits if credits else 0
+        metrics[f'{prefix}_gpa'] = summary['gpa' if prefix == 'overall' else 'required_gpa']
     metrics['req_credits'] = data.loc[data.course_type == '必修', 'credits'].sum()
     return metrics

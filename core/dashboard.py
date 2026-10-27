@@ -9,7 +9,7 @@ from core.academics import academic_summary, semester_summary
 TEAL = '#22aaa0'
 PURPLE = '#8270d8'
 PALETTE = ['#22aaa0', '#8270d8', '#f4ac74', '#e46e84', '#c9d1df']
-POLICY_NOTE = '统计口径：A- 按 85 分；形势与政策每门按 0.25 学分。原始记录保持不变，均分按统计学分加权。'
+POLICY_NOTE = '均分和绩点均按统计学分加权。A- 按 85 分、3.7 绩点；形势与政策每门按 0.25 学分。原始记录保持不变。'
 
 
 def today():
@@ -32,12 +32,20 @@ def chart_style(chart):
 
 def academic_dashboard(frame, detailed=False):
     summary = academic_summary(frame)
-    columns = st.columns(4)
-    columns[0].metric('已录入课程', f"{summary['courses']} 门")
-    columns[1].metric('累计统计学分', f"{summary['credits']:g}", help=f"原始学分 {summary['source_credits']:g}；形策每门按 0.25 学分统计")
-    columns[2].metric('加权均分', f"{summary['average']:.2f}" if summary['average'] is not None else '—')
-    columns[3].metric('90 分及以上', f"{summary['excellent']} 门")
+    required_column, overall_column = st.columns(2)
+    for column, title, average_key, gpa_key, prefix in [
+        (required_column, '必修课程', 'required_average', 'required_gpa', '必修'),
+        (overall_column, '全部课程', 'average', 'gpa', '全部'),
+    ]:
+        with column, st.container(border=True):
+            st.subheader(title)
+            average_column, gpa_column = st.columns(2)
+            average_column.metric(prefix + '均分', f"{summary[average_key]:.2f}" if summary[average_key] is not None else '—')
+            gpa_column.metric(prefix + '绩点', f"{summary[gpa_key]:.2f}" if summary[gpa_key] is not None else '—', help='先按成绩表换算每门课绩点，再按学分加权；满分 4.0。')
+    st.caption(f"已录入 {summary['courses']} 门课程 · 统计学分 {summary['credits']:g} · 90 分及以上 {summary['excellent']} 门")
     st.caption(POLICY_NOTE)
+    with st.expander('查看绩点换算表'):
+        st.table(pd.DataFrame({'等级': ['A', 'A-', 'B+', 'B', 'B-', 'C+', 'C', 'C-', 'D+', 'D', 'F'], '百分制': ['90–100', '85–89', '80–84', '76–79', '73–75', '70–72', '66–69', '63–65', '61–62', '60', '<60'], '绩点': [4.0, 3.7, 3.3, 3.0, 2.7, 2.3, 2.0, 1.7, 1.3, 1.0, 0.0]}))
     st.write('')
     left, right = st.columns([1.45, 1])
     with left, st.container(border=True):

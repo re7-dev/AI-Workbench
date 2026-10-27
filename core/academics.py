@@ -3,7 +3,8 @@ import io
 import math
 import pandas as pd
 
-GRADE_LEVELS = {'A+', 'A', 'A-', 'B+', 'B', 'B-', 'C+', 'C', 'C-', 'D', 'F', '优秀', '良好', '中等', '及格', '不及格', '通过', '不通过'}
+GRADE_LEVELS = {'A+', 'A', 'A-', 'B+', 'B', 'B-', 'C+', 'C', 'C-', 'D+', 'D', 'F', '优秀', '良好', '中等', '及格', '不及格', '通过', '不通过'}
+LETTER_POINTS = {'A': 4.0, 'A-': 3.7, 'B+': 3.3, 'B': 3.0, 'B-': 2.7, 'C+': 2.3, 'C': 2.0, 'C-': 1.7, 'D+': 1.3, 'D': 1.0, 'F': 0.0}
 GRADE_FIELDS = ('course_name', 'credits', 'grade', 'course_type', 'semester', 'course_code')
 
 
@@ -59,6 +60,12 @@ def academic_summary(frame):
     data.loc[policy, 'credits'] = 0.25
     data['score'] = pd.to_numeric(data['grade'], errors='coerce').astype(float)
     data.loc[data.grade.astype(str).str.upper().eq('A-'), 'score'] = 85.0
+    from core.scu_gpa_engine import calculate_single_gpa
+    data['grade_point'] = data.score.apply(lambda score: calculate_single_gpa(score) if pd.notna(score) and 0 <= score <= 100 else float('nan'))
+    letters = data.grade.astype(str).str.strip().str.upper().map(LETTER_POINTS)
+    data['grade_point'] = letters.combine_first(data.grade_point)
+    gpa_courses = data[data.grade_point.notna() & data.credits.gt(0)]
+    required_gpa_courses = gpa_courses[gpa_courses.course_type == '必修']
     numeric = data[data.score.between(0, 100)].copy()
     weighted = numeric[numeric.credits > 0]
     denominator = weighted.credits.sum()
@@ -69,6 +76,8 @@ def academic_summary(frame):
         'earned_credits': float(data.loc[passed, 'credits'].sum()),
         'average': float((weighted.score * weighted.credits).sum() / denominator) if denominator else None,
         'required_average': float((required.score * required.credits).sum() / required.credits.sum()) if required.credits.sum() else None,
+        'gpa': float((gpa_courses.grade_point * gpa_courses.credits).sum() / gpa_courses.credits.sum()) if gpa_courses.credits.sum() else None,
+        'required_gpa': float((required_gpa_courses.grade_point * required_gpa_courses.credits).sum() / required_gpa_courses.credits.sum()) if required_gpa_courses.credits.sum() else None,
         'excellent': int(numeric.score.ge(90).sum()), 'numeric_courses': len(numeric),
         'level_courses': int((data.score.isna()).sum()), 'weighted_credits': float(denominator),
         'numeric': numeric, 'weighted': weighted, 'all': data,
